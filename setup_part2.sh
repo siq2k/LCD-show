@@ -106,7 +106,7 @@ POLKIT2
 echo "=== Step 11: Build and install C fbcp service ==="
 sudo apt install -y gcc
 
-sudo tee /tmp/fbcp.c << 'FBCPCSRC'
+sudo tee /tmp/fbcp_src.c << 'FBCPCSRC'
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -148,8 +148,8 @@ int main() {
 }
 FBCPCSRC
 
-gcc -O3 -mcpu=cortex-a53 -o /tmp/fbcp-c /tmp/fbcp.c
-sudo install /tmp/fbcp-c /usr/local/bin/fbcp-c
+gcc -O3 -mcpu=cortex-a53 -o /tmp/fbcp_src.c /tmp/fbcp_src.c
+sudo install /tmp/fbcp_src.c /usr/local/bin/fbcp-c
 
 sudo tee /etc/systemd/system/fbcp.service << 'FBCPSVC'
 [Unit]
