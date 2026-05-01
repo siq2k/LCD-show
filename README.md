@@ -36,8 +36,8 @@ Flash a fresh **Raspberry Pi OS Trixie 32-bit Desktop** image using Raspberry Pi
 From your build machine:
 
 ```bash
-scp setup_part1.sh naz@<pi-ip>:~/
-scp setup_part2.sh naz@<pi-ip>:~/
+scp setup_part1.sh <username>@<pi-ip>:~/
+scp setup_part2.sh <username>@<pi-ip>:~/
 chmod +x ~/setup_part1.sh ~/setup_part2.sh
 ```
 
@@ -88,7 +88,7 @@ This script applies all Trixie-specific fixes and reboots. After the final reboo
 
 ## Notes
 
-- The username in the scripts is `naz`. If your username differs, update the `.bash_profile` paths in `setup_part2.sh` before running.
+- `setup_part2.sh` targets the user running the script (`$USER`) by default. To override, run `TARGET_USER=<username> bash setup_part2.sh`.
 - The framebuffer copier converts 32bpp (fb0) to 16bpp RGB565 (fb1) using numpy for performance.
 - The display runs at approximately 30fps via the Python copier. This is adequate for desktop use on a Pi Zero 2W or Pi 3B.
 - Touch calibration is handled by the stock LCD35-show script via `99-calibration.conf`.

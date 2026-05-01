@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+TARGET_USER="${TARGET_USER:-$USER}"
+
 echo "=== Step 1: Fix display rotation ==="
 sudo sed -i 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=270/' /boot/firmware/config.txt
 
@@ -168,9 +170,9 @@ FBCLEARSVC
 sudo systemctl enable fb-clear
 
 echo "=== Step 13: Fix .bash_profile ==="
-sudo chattr -i /home/naz/.bash_profile 2>/dev/null || true
-sudo chown naz:naz /home/naz/.bash_profile 2>/dev/null || true
-tee /home/naz/.bash_profile << 'BASHPROFILE'
+sudo chattr -i "/home/${TARGET_USER}/.bash_profile" 2>/dev/null || true
+sudo chown "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/.bash_profile" 2>/dev/null || true
+tee "/home/${TARGET_USER}/.bash_profile" << 'BASHPROFILE'
 export FRAMEBUFFER=/dev/fb1
 
 if [ -f "$HOME/.bashrc" ]; then
