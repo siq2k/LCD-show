@@ -22,8 +22,11 @@ The stock `LCD35-show` script was written for older Raspbian releases. On Trixie
 8. **`/dev/tty0` permissions** — Xorg requires group read access to `/dev/tty0` which Trixie does not grant by default. This must be chmod'd before lightdm starts.
 9. **`graphical.target` not set as default** — Trixie may boot to `multi-user.target`, preventing the desktop from starting.
 10. **Polkit duplicate agents** — `lxpolkit` and `polkit-mate-authentication-agent-1` both start alongside the RPD polkit agent, causing a GDBus error on desktop load.
-11. **No framebuffer copier** — since fbcp-ili9341 and rpi-fbcp both require `bcm_host.h` (removed in Trixie), a Python/numpy based fb0→fb1 copier is used instead.
+11. **No framebuffer copier** — since fbcp-ili9341 and rpi-fbcp both require `bcm_host.h` (removed in Trixie), a C-based mmap framebuffer copier is compiled and installed instead.
 12. **Display rotation** — the stock script sets `rotate=90` but this display requires `rotate=270`.
+13. **SPI bus speed** — the default SPI speed of 16MHz causes fbcp to block on writes. Setting `speed=42000000` significantly reduces latency.
+14. **Touchscreen conflicts with mouse** — the ADS7846 touchscreen registers as a pointer device alongside USB mice, causing erratic cursor movement. Touch is disabled via xorg config.
+15. **AutoAddDevices blocks USB input** — setting `AutoAddDevices false` to prevent modesetting also blocks USB keyboards and mice. `AutoAddGPU false` is used instead to prevent GPU auto-detection while allowing input devices.
 
 ## Setup Instructions
 
@@ -71,17 +74,18 @@ This script applies all Trixie-specific fixes and reboots. After the final reboo
 
 | Step | Action |
 |------|--------|
-| 1 | Fixes display rotation from 90° to 270° |
+| 1 | Fixes display rotation from 90° to 270° and sets SPI speed to 42MHz |
 | 2 | Removes duplicate `hdmi_mode=1` left by LCD35-show |
 | 3 | Disables `vc4-kms-v3d` overlay to prevent framebuffer conflict |
 | 4 | Sets `graphical.target` as the default boot target |
 | 5 | Replaces the lightdm systemd unit to remove DRI device dependencies and adds `chmod 620 /dev/tty0` pre-start |
 | 6 | Sets `logind-check-graphical=false` and `xserver-command=X -core` in lightdm.conf |
-| 7 | Creates `/etc/X11/xorg.conf.d/99-fbdev.conf` pointing Xorg at `/dev/fb0` with AutoAddDevices disabled |
+| 7 | Creates `/etc/X11/xorg.conf.d/99-fbdev.conf` pointing Xorg at `/dev/fb0` with `AutoAddGPU false` to prevent modesetting while allowing USB input |
+| 7b | Disables ADS7846 touchscreen as a pointer device to prevent mouse interference |
 | 8 | Masks `glamor-test` and `rp1-test` services and removes any existing `99-v3d.conf` |
 | 9 | Removes the SysV lightdm init script that injects boot conditions |
 | 10 | Disables duplicate polkit agents (lxpolkit and polkit-mate) for the rpd-x session |
-| 11 | Installs a Python/numpy framebuffer copier service (fb0→fb1 at ~30fps) |
+| 11 | Compiles and installs a C/mmap framebuffer copier (fb0→fb1 at ~30fps, ~5% CPU) |
 | 12 | Installs a shutdown service that clears the SPI display to black on poweroff |
 | 13 | Fixes `.bash_profile` to source `.bashrc` on login |
 | 14 | Reloads systemd and reboots |
@@ -89,9 +93,10 @@ This script applies all Trixie-specific fixes and reboots. After the final reboo
 ## Notes
 
 - `setup_part2.sh` targets the user running the script (`$USER`) by default. To override, run `TARGET_USER=<username> bash setup_part2.sh`.
-- The framebuffer copier converts 32bpp (fb0) to 16bpp RGB565 (fb1) using numpy for performance.
-- The display runs at approximately 30fps via the Python copier. This is adequate for desktop use on a Pi Zero 2W or Pi 3B.
-- Touch calibration is handled by the stock LCD35-show script via `99-calibration.conf`.
+- The C framebuffer copier uses mmap for direct memory access, compiled with `-O3 -mcpu=cortex-a53` optimisation. CPU usage is approximately 5% on a Pi 3B at 30fps.
+- Touch input is disabled as it conflicts with USB mouse input. If touch is required, remove `99-disable-touch.conf` and recalibrate via `xinput-calibrator`.
+- The SPI bus runs at 42MHz. If display corruption occurs, reduce to 32000000 in `config.txt`.
+- Touch calibration data is preserved in `99-calibration.conf` from the LCD35-show install in case it is needed later.
 
 ---
 

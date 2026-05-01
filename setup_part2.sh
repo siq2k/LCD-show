@@ -3,8 +3,8 @@ set -e
 
 TARGET_USER="${TARGET_USER:-$USER}"
 
-echo "=== Step 1: Fix display rotation ==="
-sudo sed -i 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=270/' /boot/firmware/config.txt
+echo "=== Step 1: Fix display rotation and SPI speed ==="
+sudo sed -i 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=270,speed=42000000/' /boot/firmware/config.txt
 
 echo "=== Step 2: Fix duplicate hdmi_mode ==="
 sudo sed -i '/^hdmi_mode=1$/d' /boot/firmware/config.txt
@@ -43,7 +43,8 @@ echo "=== Step 7: Fix xorg config ==="
 sudo mkdir -p /etc/X11/xorg.conf.d
 sudo tee /etc/X11/xorg.conf.d/99-fbdev.conf << 'XORG'
 Section "ServerFlags"
-    Option "AutoAddDevices" "false"
+    Option "AutoAddDevices" "true"
+    Option "AutoAddGPU" "false"
 EndSection
 
 Section "Device"
@@ -57,6 +58,15 @@ Section "Screen"
     Device "FB Device"
 EndSection
 XORG
+
+echo "=== Step 7b: Disable touchscreen input ==="
+sudo tee /etc/X11/xorg.conf.d/99-disable-touch.conf << 'TOUCH'
+Section "InputClass"
+    Identifier "ADS7846 Touchscreen"
+    MatchProduct "ADS7846 Touchscreen"
+    Option "Ignore" "true"
+EndSection
+TOUCH
 
 echo "=== Step 8: Mask glamor-test and rp1-test ==="
 sudo systemctl disable glamor-test 2>/dev/null || true
@@ -93,37 +103,53 @@ NoDisplay=true
 Hidden=true
 POLKIT2
 
-echo "=== Step 11: Install fbcp service ==="
-sudo apt install -y python3-numpy
+echo "=== Step 11: Build and install C fbcp service ==="
+sudo apt install -y gcc
 
-sudo tee /usr/local/bin/fbcp.py << 'FBCP'
-#!/usr/bin/env python3
-import time
-import numpy as np
+sudo tee /tmp/fbcp.c << 'FBCPCSRC'
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <time.h>
+#include <sys/mman.h>
 
-FB0 = '/dev/fb0'
-FB1 = '/dev/fb1'
-WIDTH = 480
-HEIGHT = 320
+#define WIDTH 480
+#define HEIGHT 320
+#define FB0_SIZE (WIDTH * HEIGHT * 4)
+#define FB1_SIZE (WIDTH * HEIGHT * 2)
 
-with open(FB0, 'rb') as f0, open(FB1, 'wb') as f1:
-    while True:
-        try:
-            f0.seek(0)
-            data = np.frombuffer(f0.read(WIDTH * HEIGHT * 4), dtype=np.uint8).reshape((WIDTH * HEIGHT, 4))
-            r = data[:, 2].astype(np.uint16)
-            g = data[:, 1].astype(np.uint16)
-            b = data[:, 0].astype(np.uint16)
-            rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-            f1.seek(0)
-            f1.write(rgb565.astype(np.uint16).tobytes())
-            f1.flush()
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(1)
-        time.sleep(0.033)
-FBCP
-sudo chmod +x /usr/local/bin/fbcp.py
+int main() {
+    int fb0 = open("/dev/fb0", O_RDONLY);
+    int fb1 = open("/dev/fb1", O_RDWR);
+    if (fb0 < 0 || fb1 < 0) { perror("open"); return 1; }
+
+    uint8_t *src = mmap(NULL, FB0_SIZE, PROT_READ, MAP_SHARED, fb0, 0);
+    uint16_t *dst = mmap(NULL, FB1_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fb1, 0);
+    if (src == MAP_FAILED || dst == MAP_FAILED) { perror("mmap"); return 1; }
+
+    struct timespec ts = {0, 33000000};
+
+    while (1) {
+        const uint8_t *s = src;
+        uint16_t *d = dst;
+        int n = WIDTH * HEIGHT;
+        while (n--) {
+            uint8_t b = *s++;
+            uint8_t g = *s++;
+            uint8_t r = *s++;
+            s++;
+            *d++ = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        }
+        nanosleep(&ts, NULL);
+    }
+    return 0;
+}
+FBCPCSRC
+
+gcc -O3 -mcpu=cortex-a53 -o /tmp/fbcp-c /tmp/fbcp.c
+sudo install /tmp/fbcp-c /usr/local/bin/fbcp-c
 
 sudo tee /etc/systemd/system/fbcp.service << 'FBCPSVC'
 [Unit]
@@ -131,7 +157,7 @@ Description=Framebuffer copy fb0 to SPI display fb1
 After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/python3 /usr/local/bin/fbcp.py
+ExecStart=/usr/local/bin/fbcp-c
 Restart=always
 RestartSec=3
 
